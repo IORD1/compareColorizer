@@ -10,9 +10,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@syncfusion/ej2-react-image-editor": "^25.1.38",
     "axios": "^1.6.8",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "recharts": "^2.12.4"
   },
   "devDependencies": {
     "@types/react": "^18.2.66",

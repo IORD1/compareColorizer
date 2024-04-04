@@ -4,7 +4,7 @@ from PIL import Image
 import numpy as np
 import cv2
 import os
-import skimage
+from skimage import io
 import glob
 import pandas as pd
 from matplotlib import pyplot as plt
@@ -16,6 +16,10 @@ import warnings
 warnings.filterwarnings("ignore")
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
+from colorization import Colorizer
+import argparse
+from colorizers import *
+
 
 app = Flask(__name__)
 CORS(app)
@@ -131,6 +135,16 @@ maxImageIndex  = 50
 #-------------------------------------------------------------------------
 
 
+def measureMae(img1,img2):
+    image1 = io.imread(img1)
+    image2 = io.imread(img2)
+    # image2_resized = cv2.resize(image2, (image1.shape[1], image1.shape[0]))
+    if image1.shape[-1] != image2.shape[-1]:
+        image2 = image2[:, :, :image1.shape[-1]]
+    difference = np.abs(image1 - image2)
+    mae = np.mean(difference)
+    print("MAE:", mae)
+    return mae
 
 @app.route('/colorize', methods=['POST'])
 def colorize():
@@ -139,6 +153,7 @@ def colorize():
 
     image_file = request.files['image']
     image_file_ref = request.files['ref']
+    image_file_cue = request.files['cue']
 
     if image_file.filename == '':
         return jsonify({'error': 'No selected file'})
@@ -147,11 +162,14 @@ def colorize():
     # Save the uploaded image temporarily
     temp_filename = 'temp_image.jpg'
     ref_image = 'ref_image.jpg'
+    cue_image = 'cue_image.jpg'
     image_file.save(temp_filename)
     image_file_ref.save(ref_image)
+    image_file_cue.save(cue_image)
     #-----------------------------------------------------------------------
             #temp_filename = 'temp_image.jpg'
             #ref_image = 'ref_image.jpg'
+            #cue_image = 'cue_image.jpg'
 
             
     #---------------------------------------------------------------
@@ -205,14 +223,54 @@ def colorize():
     # Save Picture to Dataset/Outputs folder
     predicted_picture = save_picture(target_image, 'predicted_image', y_predict)
 #-------------------------------------------------------------------------------------------
-#---------------------------CNN based----------------------------------------------------------------
+#---------------------------Visual Cues based----------------------------------------------------------------
+    colorizer = Colorizer(
+        gray_image_file='temp_image.jpg',
+        visual_clues_file='cue_image.jpg'
+    )
+    result = colorizer.colorize()
+    cv2.imwrite("visual_cue_result.jpg", result)
+#------------------------------------------------------------------------------------------------
+#-------------------------CNN based----------------------------------------------------------------------
+# load colorizers
+    colorizer_eccv16 = eccv16(pretrained=True).eval()
+    colorizer_siggraph17 = siggraph17(pretrained=True).eval()
+   
+    # default size to process images is 256x256
+    # grab L channel in both original ("orig") and resized ("rs") resolutions
+    img = load_img("temp_image.jpg")
+    (tens_l_orig, tens_l_rs) = preprocess_img(img, HW=(256,256))
+    out_img_eccv16 = postprocess_tens(tens_l_orig, colorizer_eccv16(tens_l_rs).cpu())
+    out_img_siggraph17 = postprocess_tens(tens_l_orig, colorizer_siggraph17(tens_l_rs).cpu())
+    # cv2.imwrite("out_img_eccv16.jpg", out_img_eccv16)
+    # cv2.imwrite("out_img_siggraph17.jpg", out_img_siggraph17)
+    plt.imsave('saved_eccv16.png', out_img_eccv16)
+    plt.imsave('saved_siggraph17.png', out_img_siggraph17)
+#-------------------------------------------------------------------------------------------
+#-----------------------------Calculating MAE----------------------------------------------------
+    maeResults = []
+    namesOfAlgo = ["CV2Default","KNN_ExampleBased","Visual_cues_based","CNN_ECCV16","CNN_Siggraph17"]
+    cv2defaultmae = measureMae("ref_image.jpg","colorized_image.jpg")
+    knnmae = measureMae("ref_image.jpg","outputs/predicted_image.jpg")
+    visualcuesmae = measureMae("ref_image.jpg","visual_cue_result.jpg")
+    eccv16mae = measureMae("ref_image.jpg","saved_eccv16.png")
+    siggmae = measureMae("ref_image.jpg","saved_siggraph17.png")
 
-
+    maeResults.append(cv2defaultmae)
+    maeResults.append(knnmae)
+    maeResults.append(visualcuesmae)
+    maeResults.append(eccv16mae)
+    maeResults.append(siggmae)
 #-----------------------------return everything---------------------------------------------------
     # Return the path of the colorized image
     return jsonify({
         'result': "../backend/"+colorized_filename,
         'resultKNN': "../backend/outputs/predicted_image.jpg",
+        'resultCue': "../backend/visual_cue_result.jpg",
+        'resultEccv': "../backend/saved_eccv16.png",
+        'resultSigg': "../backend/saved_siggraph17.png",
+        'mae' : maeResults,
+        'names':namesOfAlgo
         })
 # frontend/backend/colorized_image.jpg
 
